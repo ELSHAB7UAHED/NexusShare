@@ -5,24 +5,26 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number'
+        required: true
+        default: '1.0.0'
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        python-version: ['3.10']
-    
-    runs-on: ${{ matrix.os }}
+  build-windows:
+    runs-on: windows-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
     
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: '3.10'
     
     - name: Install dependencies
       run: |
@@ -30,77 +32,150 @@ jobs:
         pip install customtkinter pillow qrcode[pil]
         pip install pyinstaller
     
-    - name: Create required directories
+    - name: Copy icon file
       run: |
-        mkdir -p uploads
-        if [ -f "nexus_config.json" ]; then
-          echo "Config file exists"
-        else
-          echo '{"host": "0.0.0.0", "port": 8080, "theme": "system"}' > nexus_config.json
-        fi
+        # Check if icon exists, if not create dummy or use existing
+        if not exist "NexusShare.jpg" (
+          echo "Icon not found, checking for PNG..."
+          if exist "NexusShare.png" (
+            copy NexusShare.png NexusShare.jpg
+          ) else (
+            echo "No icon found, will build without custom icon"
+          )
+        )
     
-    - name: Build executable with PyInstaller
+    - name: Build with PyInstaller
       run: |
-        # تنظيف أسماء الملفات حسب النظام
-        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          pyinstaller --onefile \
-            --name "NexusShare" \
-            --icon "NexusShare.jpg" \
-            --add-data "uploads;uploads" \
-            --add-data "nexus_config.json;." \
-            --hidden-import=customtkinter \
-            --hidden-import=PIL \
-            --hidden-import=qrcode \
-            --noconsole \
-            NexusShare.py
-        elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-          pyinstaller --onefile \
-            --name "NexusShare" \
-            --icon "NexusShare.jpg" \
-            --add-data "uploads:uploads" \
-            --add-data "nexus_config.json:." \
-            --hidden-import=customtkinter \
-            --hidden-import=PIL \
-            --hidden-import=qrcode \
-            --noconsole \
-            NexusShare.py
-        else  # Linux
-          pyinstaller --onefile \
-            --name "NexusShare" \
-            --icon "NexusShare.jpg" \
-            --add-data "uploads:uploads" \
-            --add-data "nexus_config.json:." \
-            --hidden-import=customtkinter \
-            --hidden-import=PIL \
-            --hidden-import=qrcode \
-            NexusShare.py
+        $version = "${{ github.event.inputs.version || '1.0.0' }}"
+        if ($env:GITHUB_REF_TYPE -eq 'tag') {
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+        }
+        
+        $iconParam = ""
+        if (Test-Path "NexusShare.jpg") {
+          $iconParam = "--icon=NexusShare.jpg"
+        } elseif (Test-Path "NexusShare.png") {
+          $iconParam = "--icon=NexusShare.png"
+        }
+        
+        pyinstaller `
+          --name="NexusShare" `
+          $iconParam `
+          --windowed `
+          --onefile `
+          --add-data="uploads;uploads" `
+          --add-data="nexus_config.json;." `
+          --hidden-import="PIL" `
+          --hidden-import="customtkinter" `
+          --hidden-import="qrcode" `
+          --clean `
+          --noconfirm `
+          "NexusShare.py"
     
-    - name: Test executable
+    - name: Create version file
       run: |
-        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          timeout 5 dist/NexusShare.exe || true
-        else
-          timeout 5 dist/NexusShare || true
-        fi
+        $version = "${{ github.event.inputs.version || '1.0.0' }}"
+        if ($env:GITHUB_REF_TYPE -eq 'tag') {
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+        }
+        
+        @"
+        NexusShare v$version
+        Build Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        Commit: ${{ github.sha }}
+        GitHub: ${{ github.repository }}
+        "@ | Out-File -FilePath "dist/version.txt" -Encoding UTF8
     
-    - name: Upload artifacts
+    - name: Create archive
+      run: |
+        $version = "${{ github.event.inputs.version || '1.0.0' }}"
+        if ($env:GITHUB_REF_TYPE -eq 'tag') {
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+        }
+        
+        Compress-Archive -Path "dist/NexusShare.exe", "dist/version.txt" `
+          -DestinationPath "NexusShare_v$version.zip" `
+          -Force
+    
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: NexusShare-${{ matrix.os }}
+        name: NexusShare-Windows
         path: |
-          dist/
-          uploads/
-          nexus_config.json
-        if-no-files-found: error
+          NexusShare_v*.zip
+          dist/NexusShare.exe
+  
+  build-linux:
+    runs-on: ubuntu-latest
     
-    - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
       with:
-        files: |
-          dist/NexusShare*
-          uploads/
-          nexus_config.json
-          README.md
-        draft: false
-        prerelease: false
+        python-version: '3.10'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-tk python3-pil python3-pil.imagetk
+    
+    - name: Install Python dependencies
+      run: |
+        pip install --upgrade pip
+        pip install customtkinter pillow qrcode[pil]
+        pip install pyinstaller
+    
+    - name: Build with PyInstaller
+      run: |
+        version="${{ github.event.inputs.version || '1.0.0' }}"
+        if [[ "${{ github.ref_type }}" == "tag" ]]; then
+          version="${GITHUB_REF#refs/tags/v}"
+        fi
+        
+        icon_param=""
+        if [ -f "NexusShare.jpg" ]; then
+          icon_param="--icon=NexusShare.jpg"
+        elif [ -f "NexusShare.png" ]; then
+          icon_param="--icon=NexusShare.png"
+        fi
+        
+        pyinstaller \
+          --name="NexusShare" \
+          $icon_param \
+          --windowed \
+          --onefile \
+          --add-data="uploads:uploads" \
+          --add-data="nexus_config.json:." \
+          --hidden-import="PIL" \
+          --hidden-import="customtkinter" \
+          --hidden-import="qrcode" \
+          --clean \
+          --noconfirm \
+          "NexusShare.py"
+    
+    - name: Create AppImage structure (optional)
+      run: |
+        mkdir -p AppDir/usr/bin
+        cp dist/NexusShare AppDir/usr/bin/
+        cp NexusShare.jpg AppDir/ || cp NexusShare.png AppDir/ || true
+        
+        cat > AppDir/NexusShare.desktop << EOF
+        [Desktop Entry]
+        Type=Application
+        Name=NexusShare
+        Comment=Professional File Sharing Server
+        Exec=NexusShare
+        Icon=NexusShare
+        Categories=Network;FileTransfer;
+        EOF
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: NexusShare-Linux
+        path: |
+          dist/NexusShare
+          AppDir/
