@@ -45,7 +45,7 @@ jobs:
         if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
           pyinstaller --onefile \
             --name "NexusShare" \
-            --icon "NexusShare.png" \
+            --icon "NexusShare.jpg" \
             --add-data "uploads;uploads" \
             --add-data "nexus_config.json;." \
             --hidden-import=customtkinter \
@@ -56,7 +56,7 @@ jobs:
         elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
           pyinstaller --onefile \
             --name "NexusShare" \
-            --icon "NexusShare.png" \
+            --icon "NexusShare.jpg" \
             --add-data "uploads:uploads" \
             --add-data "nexus_config.json:." \
             --hidden-import=customtkinter \
@@ -67,7 +67,7 @@ jobs:
         else  # Linux
           pyinstaller --onefile \
             --name "NexusShare" \
-            --icon "NexusShare.png" \
+            --icon "NexusShare.jpg" \
             --add-data "uploads:uploads" \
             --add-data "nexus_config.json:." \
             --hidden-import=customtkinter \
