@@ -1,0 +1,106 @@
+name: Build NexusShare Executable
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python-version: ['3.10']
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install customtkinter pillow qrcode[pil]
+        pip install pyinstaller
+    
+    - name: Create required directories
+      run: |
+        mkdir -p uploads
+        if [ -f "nexus_config.json" ]; then
+          echo "Config file exists"
+        else
+          echo '{"host": "0.0.0.0", "port": 8080, "theme": "system"}' > nexus_config.json
+        fi
+    
+    - name: Build executable with PyInstaller
+      run: |
+        # تنظيف أسماء الملفات حسب النظام
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          pyinstaller --onefile \
+            --name "NexusShare" \
+            --icon "NexusShare.png" \
+            --add-data "uploads;uploads" \
+            --add-data "nexus_config.json;." \
+            --hidden-import=customtkinter \
+            --hidden-import=PIL \
+            --hidden-import=qrcode \
+            --noconsole \
+            NexusShare.py
+        elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+          pyinstaller --onefile \
+            --name "NexusShare" \
+            --icon "NexusShare.png" \
+            --add-data "uploads:uploads" \
+            --add-data "nexus_config.json:." \
+            --hidden-import=customtkinter \
+            --hidden-import=PIL \
+            --hidden-import=qrcode \
+            --noconsole \
+            NexusShare.py
+        else  # Linux
+          pyinstaller --onefile \
+            --name "NexusShare" \
+            --icon "NexusShare.png" \
+            --add-data "uploads:uploads" \
+            --add-data "nexus_config.json:." \
+            --hidden-import=customtkinter \
+            --hidden-import=PIL \
+            --hidden-import=qrcode \
+            NexusShare.py
+    
+    - name: Test executable
+      run: |
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          timeout 5 dist/NexusShare.exe || true
+        else
+          timeout 5 dist/NexusShare || true
+        fi
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: NexusShare-${{ matrix.os }}
+        path: |
+          dist/
+          uploads/
+          nexus_config.json
+        if-no-files-found: error
+    
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/NexusShare*
+          uploads/
+          nexus_config.json
+          README.md
+        draft: false
+        prerelease: false
